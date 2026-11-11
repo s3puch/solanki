@@ -14,6 +14,8 @@ jobs:
         with: { python-version: "3.12" }
       - run: pip install requests
       - run: python update_scholar.py index.html
+        env:
+          SERPAPI_KEY: ${{ secrets.SERPAPI_KEY }}
       - name: Commit if changed
         run: |
           git config user.name "scholar-bot"
