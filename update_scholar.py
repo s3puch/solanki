@@ -6,7 +6,6 @@ import html, json, re, sys, datetime
 import requests
 
 USER = "3N7SxOkAAAAJ"
-URL = f"https://scholar.google.com/citations?user={USER}&hl=en&cstart=0&pagesize=100"
 # key -> substring of the paper title (lower-case) as it appears on Scholar
 MATCH = {
     "jacs": "platinum graphene catalytic condenser",
@@ -22,18 +21,18 @@ if not m:
     sys.exit("scholar-data block not found")
 data = json.loads(m.group(2))
 
-r = requests.get(URL, headers={"User-Agent": "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 Chrome/124 Safari/537.36"}, timeout=30)
+import os
+key = os.environ.get("SERPAPI_KEY")
+if not key:
+    sys.exit("SERPAPI_KEY is not set (add it as a GitHub repo secret).")
+r = requests.get("https://serpapi.com/search.json",
+                 params={"engine": "google_scholar_author", "author_id": USER,
+                         "hl": "en", "num": 100, "api_key": key}, timeout=60)
 r.raise_for_status()
-rows = re.findall(r'<tr class="gsc_a_tr">(.*?)</tr>', r.text, re.S)
-if not rows:
-    sys.exit("No publication rows found (Scholar probably served a CAPTCHA); not updating.")
-
-counts = {}
-for row in rows:
-    t = re.search(r'class="gsc_a_at"[^>]*>(.*?)</a>', row, re.S)
-    c = re.search(r'class="gsc_a_ac[^"]*"[^>]*>(\d*)</a>', row, re.S)
-    if t:
-        counts[html.unescape(re.sub("<.*?>", "", t.group(1))).lower()] = int(c.group(1) or 0) if c else 0
+j = r.json()
+if "articles" not in j:
+    sys.exit("Unexpected SerpAPI response: " + str(j)[:300])
+counts = {a["title"].lower(): int((a.get("cited_by") or {}).get("value") or 0) for a in j["articles"]}
 
 for p in data["papers"]:
     needle = MATCH.get(p["key"])
@@ -41,8 +40,10 @@ for p in data["papers"]:
     if hit:
         p["n"] = max(hit)
 
-tot = re.search(r'Citations</a></td><td class="gsc_rsb_std">(\d+)', r.text)
-data["total"] = int(tot.group(1)) if tot else sum(counts.values())
+try:
+    data["total"] = int(j["cited_by"]["table"][0]["citations"]["all"])
+except Exception:
+    data["total"] = sum(counts.values())
 data["updated"] = datetime.date.today().strftime("%B %d, %Y")
 
 new = m.group(1) + json.dumps(data, ensure_ascii=False) + m.group(3)
